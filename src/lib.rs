@@ -12,15 +12,15 @@ pub fn main(config: Config) -> Result<String, Box<dyn Error>> {
     Ok(String::from("hi"))
 }
 
-fn calculate_sample_points(config: &Config) -> Box<Vec<Vec<CNumber>>> {
+fn calculate_sample_points(config: &Config) -> Vec<Vec<CNumber>> {
     let step_size_x = 3.0 / config.width;
     let step_size_y = 2.0 / config.height;
 
     let offset_x = config.center.real - config.width / 2.0 * step_size_x;
     let offset_y = -(config.center.imag - config.height / 2.0 * step_size_y);
 
-    let mut coords: Box<Vec<Vec<CNumber>>> =
-        Box::from(vec![vec![CNumber::new(0.0, 0.0); config.width as usize]; config.height as usize]);
+    let mut coords: Vec<Vec<CNumber>> =
+        vec![vec![CNumber::new(0.0, 0.0); config.width as usize]; config.height as usize];
 
     for i in 0..config.width as usize {
         for j in 0..config.height as usize {
@@ -37,10 +37,10 @@ fn check_mandelbrot(number: &CNumber, iter: i32, threshold: f64) -> i32 {
     let mut n = CNumber::new(0.0, 0.0);
     let c = number;
 
-    n = n + c;
+    n = n + *c;
 
     for _ in 0..iter {
-        n = n * n + c;
+        n = n * n + *c;
     }
 
     if n.real < threshold && n.imag < threshold {
@@ -50,9 +50,16 @@ fn check_mandelbrot(number: &CNumber, iter: i32, threshold: f64) -> i32 {
     }
 }
 
-fn draw(values: Box<Vec<Vec<i32>>>) -> String {
-    let mut lines = vec![];
+fn draw(values: Vec<Vec<&str>>) -> String {
+    let mut out = String::new();
 
+    for line in values {
+        for char in line {
+            out += char;
+        }
+    }
+
+    out
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -67,10 +74,10 @@ impl CNumber {
     }
 }
 
-impl Add for &CNumber {
+impl Add for CNumber {
     type Output = CNumber;
 
-    fn add(&self, b: CNumber) -> Self::Output {
+    fn add(self, b: CNumber) -> Self::Output {
         let real = self.real + b.real;
         let imag = self.imag + b.imag;
 
@@ -78,7 +85,7 @@ impl Add for &CNumber {
     }
 }
 
-impl Mul for &CNumber {
+impl Mul for CNumber {
     type Output = CNumber;
 
     fn mul(self, b: Self) -> Self::Output {
@@ -128,7 +135,7 @@ impl Config {
 
 //#[cfg(tests)]
 mod tests {
-    use crate::{Config, calculate_sample_points};
+    use crate::{Config, calculate_sample_points, check_mandelbrot, CNumber, draw};
 
     #[test]
     fn correct_size_points() {
@@ -138,5 +145,28 @@ mod tests {
 
         result[0][0];
         result[0][99];
+    }
+
+    #[test]
+    fn check_mandelbrot_test() {
+        let iter = 1000;
+        let thr = 100.0;
+
+        assert_eq!(check_mandelbrot(&CNumber::new(1.0, 1.0), iter, thr), 0);
+        assert_eq!(check_mandelbrot(&CNumber::new(2.0, 0.0), iter, thr), 0);
+        assert_eq!(check_mandelbrot(&CNumber::new(0.0, 0.0), iter, thr), 1);
+        assert_eq!(check_mandelbrot(&CNumber::new(0.0, 3.0), iter, thr), 0);
+        assert_eq!(check_mandelbrot(&CNumber::new(0.8, 0.0), iter, thr), 0);
+        assert_eq!(check_mandelbrot(&CNumber::new(0.7, 0.0), iter, thr), 0);
+    }
+
+    #[test]
+    fn draw_test() {
+        let vector = vec![vec!["a", "b", "c", "d", "e"]; 2];
+        let out = draw(vector);
+        println!("{}", out);
+        assert_eq!(out, "\
+        abcde\
+        abcde")
     }
 }
