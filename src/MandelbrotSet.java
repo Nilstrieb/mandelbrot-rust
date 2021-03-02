@@ -18,7 +18,7 @@ public class MandelbrotSet {
 
 		// important settings-------------------------------------------------------------
 		int pointNumber = 1;
-		int quality = 2; // 0 = very low, 1 = low, 2 = medium, 3 = high, 4 = ultra, any number bigger than 5 = custom
+		int quality = 2; // 0 = very low, 1 = low, 2 = medium, 3 = HIGH, 4 = ultra, any number bigger than 5 = custom
 		double zoomSpeed = 1.1; // >1
 		int frames = 100;
 		int width = 1920;
@@ -36,7 +36,7 @@ public class MandelbrotSet {
 		int iterations;
 		double threshold = 100;
 		char low = ' ';
-		char high = '#';
+		char HIGH = '#';
 
 		if (quality == 0) {
 			iterations = 20;
@@ -101,7 +101,7 @@ public class MandelbrotSet {
 
 			} else {
 				// draw
-				draw(low, high, width, height, values);
+				draw(low, HIGH, width, height, values);
 			}
 
 			System.out.println("------------------------Frame " + frameCounter + " finished------------------------");
@@ -117,9 +117,9 @@ public class MandelbrotSet {
 
 	}
 
-	static void draw(char low, char high, int width, int height, double[][] values) {
+	static void draw(char low, char HIGH, int width, int height, double[][] values) {
 		// a method to draw a filled rectangle of size width * height
-		// each cell can be low or high, and it will show the corresponding char in each cell
+		// each cell can be low or HIGH, and it will show the corresponding char in each cell
 		String line;
 
 		for (int i = 0; i < height; i++) {
@@ -129,7 +129,7 @@ public class MandelbrotSet {
 				// for every char:
 				double value = values[j][i];
 				if (value >= 1) {
-					line += high;
+					line += HIGH;
 				} else {
 					line += low;
 				}
