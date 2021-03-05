@@ -1,6 +1,9 @@
 use std::error::Error;
 use std::time::SystemTime;
 use std::ops::{Add, Mul};
+use std::alloc::System;
+use std::env::Args;
+use std::fmt::{Display, Formatter, Pointer};
 
 pub fn run(config: Config) -> Result<String, Box<dyn Error>> {
     check_mandelbrot(&CNumber::new(-2.17068377, -1.13646737), 100, 100.0);
@@ -9,15 +12,19 @@ pub fn run(config: Config) -> Result<String, Box<dyn Error>> {
     //let start_time = start_time.as_millis();
 
     let coords = calculate_sample_points(&config);
+    println!("coords done after: {}μs", start_time.elapsed()?.as_micros());
+
     let result = check_whole_mandelbrot(&coords, config.iterations, config.threshold);
     let draw = draw(result);
     println!("{}", draw);
 
-    println!("Time: {}ms", start_time.elapsed()?.as_millis());
+    println!("Total Time: {}ms", start_time.elapsed()?.as_millis());
     Ok(String::from("hi"))
 }
 
 fn calculate_sample_points(config: &Config) -> Vec<Vec<CNumber>> {
+    let start_time = SystemTime::now();
+
     let step_size_x = 3.0 / config.width;
     let step_size_y = 2.0 / config.height;
 
@@ -27,6 +34,8 @@ fn calculate_sample_points(config: &Config) -> Vec<Vec<CNumber>> {
     let mut coords: Vec<Vec<CNumber>> =
         vec![vec![CNumber::new(0.0, 0.0); config.width as usize]; config.height as usize];
 
+    println!("Allocated sample vector after {}μs", start_time.elapsed().unwrap().as_micros());
+
     for i in 0..config.width as usize {
         for j in 0..config.height as usize {
             coords[j][i].real = offset_x + step_size_x * i as f64;
@@ -34,7 +43,6 @@ fn calculate_sample_points(config: &Config) -> Vec<Vec<CNumber>> {
         }
     }
 
-    println!("{:?}", coords[0][0]);
     coords
 }
 
@@ -42,21 +50,33 @@ static HIGH: &str = "#";
 static LOW: &str = " ";
 
 fn check_whole_mandelbrot(nums: &Vec<Vec<CNumber>>, iter: i32, threshold: f64) -> Vec<Vec<&str>> {
+    let start_time = SystemTime::now();
+    println!("Started calculating");
+
     let height = nums.len();
     let width = nums[0].len();
 
     let mut result: Vec<Vec<&str>> = vec![vec![""; nums[0].len()]; nums.len()];
 
+    println!("Allocated result vector after {}μs", start_time.elapsed().unwrap().as_micros());
+
     for i in 0..height {
+        let row_start_time = SystemTime::now();
         for j in 0..width {
             result[i][j] = check_mandelbrot(&nums[i][j], iter, threshold);
         }
+        println!("Completed row {} after {}ms", i, row_start_time.elapsed().unwrap().as_millis());
     }
+
+    println!("Calculated results after {}ms", start_time.elapsed().unwrap().as_millis());
+
 
     result
 }
 
 fn check_mandelbrot(number: &CNumber, iter: i32, threshold: f64) -> &str {
+    //let start_time = SystemTime::now();
+
     let mut n = CNumber::new(0.0, 0.0);
     let c = number;
 
@@ -69,11 +89,13 @@ fn check_mandelbrot(number: &CNumber, iter: i32, threshold: f64) -> &str {
             return LOW;
         }
     }
-
+    //println!("Late return took {}μs, did {} iterations", start_time.elapsed().unwrap().as_micros(), iter);
     HIGH
 }
 
 fn draw(values: Vec<Vec<&str>>) -> String {
+    let start_time = SystemTime::now();
+    println!("Started calculating");
     let mut out = String::new();
 
     for line in values {
@@ -82,6 +104,8 @@ fn draw(values: Vec<Vec<&str>>) -> String {
         }
         out += "\n";
     }
+
+    println!("Finished drawing after {}μs", start_time.elapsed().unwrap().as_micros());
 
     out
 }
@@ -132,6 +156,31 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn from(args: Args) -> Result<Config, Box<dyn Error>> {
+        let mut config = Config::default();
+
+        for arg in args {
+            if arg.contains("=") {
+                let mut split = arg.split("=");
+                let key = split.next();
+                let value = split.next();
+            }
+        }
+
+        Ok(Config::new(1, 3, 100, 100.0))
+    }
+
+    fn set_value(key: &str, value: &str) -> Result<(), Box<dyn Error>>{
+        match key {
+
+            _ => Err(Box::from(PropertyNotFound { msg: "Property not found" }).unwrap())
+        }
+    }
+
+    fn default() -> Config {
+        Config::new(1, 3, 100, 100.0)
+    }
+
     pub fn new(point_number: usize, quality: i32, width: i32, threshold: f32) -> Config {
         let height = width as f32 * 0.2;
 
@@ -155,6 +204,19 @@ impl Config {
         }
     }
 }
+
+#[derive(Debug)]
+struct PropertyNotFound {
+    msg: &'static str
+}
+
+impl Display for PropertyNotFound {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        !unimplemented!()
+    }
+}
+
+impl Error for PropertyNotFound {}
 
 //#[cfg(tests)]
 mod tests {
