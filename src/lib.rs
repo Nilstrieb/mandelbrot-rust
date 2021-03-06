@@ -1,21 +1,19 @@
 use std::error::Error;
 use std::time::SystemTime;
 use std::ops::{Add, Mul};
-use std::alloc::System;
 use std::env::Args;
 use std::fmt::{Display, Formatter, Pointer};
 
 pub fn run(config: Config) -> Result<String, Box<dyn Error>> {
-    check_mandelbrot(&CNumber::new(-2.17068377, -1.13646737), 100, 100.0);
+    println!("w={}", config.width);
 
     let start_time = SystemTime::now();
-    //let start_time = start_time.as_millis();
 
     let coords = calculate_sample_points(&config);
     println!("coords done after: {}μs", start_time.elapsed()?.as_micros());
 
     let result = check_whole_mandelbrot(&coords, config.iterations, config.threshold);
-    let draw = draw(result);
+    let draw = draw(result, config.iterations);
     println!("{}", draw);
 
     println!("Total Time: {}ms", start_time.elapsed()?.as_millis());
@@ -25,19 +23,21 @@ pub fn run(config: Config) -> Result<String, Box<dyn Error>> {
 fn calculate_sample_points(config: &Config) -> Vec<Vec<CNumber>> {
     let start_time = SystemTime::now();
 
+    let height = config.width as f64 * 0.2;
+
     let step_size_x = 3.0 / config.width;
-    let step_size_y = 2.0 / config.height;
+    let step_size_y = 2.0 / height;
 
     let offset_x = config.center.real - config.width / 2.0 * step_size_x;
-    let offset_y = -(config.center.imag - config.height / 2.0 * step_size_y) - 2.0;
+    let offset_y = -(config.center.imag - height / 2.0 * step_size_y) - 2.0;
 
     let mut coords: Vec<Vec<CNumber>> =
-        vec![vec![CNumber::new(0.0, 0.0); config.width as usize]; config.height as usize];
+        vec![vec![CNumber::new(0.0, 0.0); config.width as usize]; height as usize];
 
     println!("Allocated sample vector after {}μs", start_time.elapsed().unwrap().as_micros());
 
     for i in 0..config.width as usize {
-        for j in 0..config.height as usize {
+        for j in 0..height as usize {
             coords[j][i].real = offset_x + step_size_x * i as f64;
             coords[j][i].imag = offset_y + step_size_y * j as f64;
         }
@@ -46,26 +46,20 @@ fn calculate_sample_points(config: &Config) -> Vec<Vec<CNumber>> {
     coords
 }
 
-static HIGH: &str = "#";
-static LOW: &str = " ";
-
-fn check_whole_mandelbrot(nums: &Vec<Vec<CNumber>>, iter: i32, threshold: f64) -> Vec<Vec<&str>> {
+fn check_whole_mandelbrot(nums: &Vec<Vec<CNumber>>, iter: i32, threshold: f64) -> Vec<Vec<i32>> {
     let start_time = SystemTime::now();
     println!("Started calculating");
 
     let height = nums.len();
     let width = nums[0].len();
 
-    let mut result: Vec<Vec<&str>> = vec![vec![""; nums[0].len()]; nums.len()];
+    let mut result: Vec<Vec<i32>> = vec![vec![0; nums[0].len()]; nums.len()];
 
-    println!("Allocated result vector after {}μs", start_time.elapsed().unwrap().as_micros());
 
     for i in 0..height {
-        let row_start_time = SystemTime::now();
         for j in 0..width {
             result[i][j] = check_mandelbrot(&nums[i][j], iter, threshold);
         }
-        println!("Completed row {} after {}ms", i, row_start_time.elapsed().unwrap().as_millis());
     }
 
     println!("Calculated results after {}ms", start_time.elapsed().unwrap().as_millis());
@@ -74,7 +68,7 @@ fn check_whole_mandelbrot(nums: &Vec<Vec<CNumber>>, iter: i32, threshold: f64) -
     result
 }
 
-fn check_mandelbrot(number: &CNumber, iter: i32, threshold: f64) -> &str {
+fn check_mandelbrot(number: &CNumber, iter: i32, threshold: f64) -> i32 {
     //let start_time = SystemTime::now();
 
     let mut n = CNumber::new(0.0, 0.0);
@@ -82,25 +76,27 @@ fn check_mandelbrot(number: &CNumber, iter: i32, threshold: f64) -> &str {
 
     n = n + *c;
 
-    for _ in 0..iter {
+    for i in 0..iter {
         n = n * n + *c;
 
         if n.imag > threshold || n.real > threshold {
-            return LOW;
+            return i;
         }
     }
-    //println!("Late return took {}μs, did {} iterations", start_time.elapsed().unwrap().as_micros(), iter);
-    HIGH
+
+    iter
 }
 
-fn draw(values: Vec<Vec<&str>>) -> String {
+static HIGH: &str = "#";
+static LOW: &str = " ";
+
+fn draw(values: Vec<Vec<i32>>, iterations: i32) -> String {
     let start_time = SystemTime::now();
-    println!("Started calculating");
     let mut out = String::new();
 
     for line in values {
         for char in line {
-            out += char;
+            out += if char < iterations { LOW } else { HIGH };
         }
         out += "\n";
     }
@@ -150,7 +146,6 @@ pub struct Config {
     width: f64,
     threshold: f64,
     //-- calculated
-    height: f64,
     center: CNumber,
     iterations: i32,
 }
@@ -164,40 +159,44 @@ impl Config {
                 let mut split = arg.split("=");
                 let key = split.next();
                 let value = split.next();
+
+                let value_f64: f64 = value.ok_or_else(||PropertyError {msg: format!("Error while parsing argument {}", arg)})?.parse()?;
+                config.set_value(key, value_f64);
+                println!("k={}, v={}, v64={}", key.unwrap(), value.unwrap(), value_f64);
             }
         }
 
-        Ok(Config::new(1, 3, 100, 100.0))
+        Ok(config)
     }
 
-    fn set_value(key: &str, value: &str) -> Result<(), Box<dyn Error>>{
+    fn set_value(&mut self, key: Option<&str>, value: f64) -> Result<(), Box<dyn Error>> {
+        println!("setting arg value");
         match key {
-
-            _ => Err(Box::from(PropertyNotFound { msg: "Property not found" }).unwrap())
+            Some("iter") | Some("iterations") =>
+                self.iterations = value as i32,
+            Some("thres") | Some("threshold") =>
+                self.threshold = value,
+            Some("w") | Some("width") =>
+                self.width = value,
+            Some("quality") | Some("q") =>
+                self.iterations = value as i32,
+            _ => return Err(Box::new(PropertyError { msg: format!("Property not found: {}", key.unwrap_or_else(|| "")) }))
         }
+
+        Ok(())
     }
 
-    fn default() -> Config {
+    pub fn default() -> Config {
         Config::new(1, 3, 100, 100.0)
     }
 
     pub fn new(point_number: usize, quality: i32, width: i32, threshold: f32) -> Config {
-        let height = width as f32 * 0.2;
-
         let interesting_points = vec![CNumber::new(-0.75, 0.0), CNumber::new(-0.77568377, 0.13646737)];
         let center = interesting_points[point_number];
-        let iterations = match quality {
-            0 => 20,
-            1 => 500,
-            2 => 1000,
-            3 => 5000,
-            4 => 20000,
-            _ => quality
-        };
+        let iterations = config_iter_from_quality(quality);
 
         Config {
             width: width as f64,
-            height: height as f64,
             center,
             iterations,
             threshold: threshold as f64,
@@ -205,20 +204,31 @@ impl Config {
     }
 }
 
-#[derive(Debug)]
-struct PropertyNotFound {
-    msg: &'static str
-}
-
-impl Display for PropertyNotFound {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
-        !unimplemented!()
+fn config_iter_from_quality(quality: i32) -> i32 {
+    match quality {
+        0 => 20,
+        1 => 500,
+        2 => 1000,
+        3 => 5000,
+        4 => 20000,
+        _ => quality
     }
 }
 
-impl Error for PropertyNotFound {}
+#[derive(Debug)]
+struct PropertyError {
+    msg: String
+}
 
-//#[cfg(tests)]
+impl Display for PropertyError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.msg)
+    }
+}
+
+impl Error for PropertyError {}
+
+#[cfg(tests)]
 mod tests {
     use crate::{CNumber, calculate_sample_points, check_mandelbrot, draw, HIGH, LOW, Config};
 
@@ -259,25 +269,25 @@ mod tests {
         let iter = 1000;
         let thr = 100.0;
 
-        assert_eq!(check_mandelbrot(&CNumber::new(1.0, 1.0), iter, thr), LOW);
-        assert_eq!(check_mandelbrot(&CNumber::new(2.0, 0.0), iter, thr), LOW);
-        assert_eq!(check_mandelbrot(&CNumber::new(0.0, 0.0), iter, thr), HIGH);
-        assert_eq!(check_mandelbrot(&CNumber::new(0.0, 3.0), iter, thr), LOW);
-        assert_eq!(check_mandelbrot(&CNumber::new(0.8, 0.0), iter, thr), LOW);
-        assert_eq!(check_mandelbrot(&CNumber::new(0.7, 0.0), iter, thr), LOW);
-        assert_eq!(check_mandelbrot(&CNumber::new(0.7, 0.0), iter, thr), LOW);
-        assert_eq!(check_mandelbrot(&CNumber::new(0.1, 0.1), iter, thr), HIGH);
-        assert_eq!(check_mandelbrot(&CNumber::new(0.1, 0.1), iter, thr), HIGH);
-        assert_eq!(check_mandelbrot(&CNumber::new(-2.17068377, -1.13646737), iter, thr), LOW); //CNumber { real: -2.17068377, imag: -1.13646737 }
+        assert!(check_mandelbrot(&CNumber::new(1.0, 1.0), iter, thr) < iter);
+        assert!(check_mandelbrot(&CNumber::new(2.0, 0.0), iter, thr) < iter);
+        assert_eq!(check_mandelbrot(&CNumber::new(0.0, 0.0), iter, thr), iter);
+        assert!(check_mandelbrot(&CNumber::new(0.0, 3.0), iter, thr) < iter);
+        assert!(check_mandelbrot(&CNumber::new(0.8, 0.0), iter, thr) < iter);
+        assert!(check_mandelbrot(&CNumber::new(0.7, 0.0), iter, thr) < iter);
+        assert!(check_mandelbrot(&CNumber::new(0.7, 0.0), iter, thr) < iter);
+        assert_eq!(check_mandelbrot(&CNumber::new(0.1, 0.1), iter, thr), iter);
+        assert_eq!(check_mandelbrot(&CNumber::new(0.1, 0.1), iter, thr), iter);
+        assert!(check_mandelbrot(&CNumber::new(-2.17068377, -1.13646737), iter, thr) < iter); //CNumber { real: -2.17068377, imag: -1.13646737 }
     }
 
     #[test]
     fn draw_test() {
-        let vector = vec![vec!["a", "b", "c", "d", "e"]; 2];
-        let out = draw(vector);
+        let vector = vec![vec![0, 0, 10, 10, 10]; 2];
+        let out = draw(vector, 10);
         println!("{}", out);
-        assert_eq!(out, "abcde
-abcde
+        assert_eq!(out, "  ###
+  ###
 ")
     }
 }
