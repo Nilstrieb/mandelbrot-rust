@@ -2,28 +2,39 @@ use std::error::Error;
 use std::time::SystemTime;
 use std::ops::{Add, Mul};
 use std::env::Args;
-use std::fmt::{Display, Formatter, Pointer};
+use std::fmt::{Display, Formatter};
+use image::{RgbImage, ImageBuffer, ImageResult};
 
 pub fn run(config: Config) -> Result<String, Box<dyn Error>> {
-    println!("w={}", config.width);
-
     let start_time = SystemTime::now();
+    let debug = config.debug;
 
     let coords = calculate_sample_points(&config);
-    println!("coords done after: {}μs", start_time.elapsed()?.as_micros());
+    if debug { println!("sample points calculated after: {}μs", start_time.elapsed()?.as_micros()); }
 
     let result = check_whole_mandelbrot(&coords, config.iterations, config.threshold);
-    let draw = draw(result, config.iterations);
-    println!("{}", draw);
+    if debug { println!("calculated after: {}ms", start_time.elapsed()?.as_millis()); }
 
-    println!("Total Time: {}ms", start_time.elapsed()?.as_millis());
-    Ok(String::from("hi"))
+    if config.is_image {
+        create_image(&result, config.iterations, "img.png")?;
+        if debug { println!("image created after: {}ms", start_time.elapsed()?.as_millis()); }
+    }
+    if config.is_console {
+        let draw = draw(&result, config.iterations);
+        println!("{}", draw);
+        if debug { println!("drawn after: {}μs", start_time.elapsed()?.as_micros()); }
+    }
+
+    if debug { println!("Total Time: {}ms", start_time.elapsed()?.as_millis()); }
+    Ok(String::new())
 }
 
 fn calculate_sample_points(config: &Config) -> Vec<Vec<CNumber>> {
-    let start_time = SystemTime::now();
-
-    let height = config.width as f64 * 0.2;
+    let height = if config.is_image {
+        config.width as f64 * 2.0 / 3.0
+    } else {
+        config.width as f64 * 0.2
+    };
 
     let step_size_x = 3.0 / config.width;
     let step_size_y = 2.0 / height;
@@ -33,8 +44,6 @@ fn calculate_sample_points(config: &Config) -> Vec<Vec<CNumber>> {
 
     let mut coords: Vec<Vec<CNumber>> =
         vec![vec![CNumber::new(0.0, 0.0); config.width as usize]; height as usize];
-
-    println!("Allocated sample vector after {}μs", start_time.elapsed().unwrap().as_micros());
 
     for i in 0..config.width as usize {
         for j in 0..height as usize {
@@ -47,30 +56,23 @@ fn calculate_sample_points(config: &Config) -> Vec<Vec<CNumber>> {
 }
 
 fn check_whole_mandelbrot(nums: &Vec<Vec<CNumber>>, iter: i32, threshold: f64) -> Vec<Vec<i32>> {
-    let start_time = SystemTime::now();
-    println!("Started calculating");
-
     let height = nums.len();
     let width = nums[0].len();
 
     let mut result: Vec<Vec<i32>> = vec![vec![0; nums[0].len()]; nums.len()];
 
-
     for i in 0..height {
         for j in 0..width {
             result[i][j] = check_mandelbrot(&nums[i][j], iter, threshold);
         }
+
+        println!("{:.2} of 100%", i as f64 / height as f64 * 100.0);
     }
-
-    println!("Calculated results after {}ms", start_time.elapsed().unwrap().as_millis());
-
 
     result
 }
 
 fn check_mandelbrot(number: &CNumber, iter: i32, threshold: f64) -> i32 {
-    //let start_time = SystemTime::now();
-
     let mut n = CNumber::new(0.0, 0.0);
     let c = number;
 
@@ -90,20 +92,33 @@ fn check_mandelbrot(number: &CNumber, iter: i32, threshold: f64) -> i32 {
 static HIGH: &str = "#";
 static LOW: &str = " ";
 
-fn draw(values: Vec<Vec<i32>>, iterations: i32) -> String {
-    let start_time = SystemTime::now();
+fn draw(values: &Vec<Vec<i32>>, iterations: i32) -> String {
     let mut out = String::new();
 
     for line in values {
         for char in line {
-            out += if char < iterations { LOW } else { HIGH };
+            out += if char < &iterations { LOW } else { HIGH };
         }
         out += "\n";
     }
 
-    println!("Finished drawing after {}μs", start_time.elapsed().unwrap().as_micros());
-
     out
+}
+
+fn create_image(values: &Vec<Vec<i32>>, iterations: i32, path: &str) -> ImageResult<()> {
+    let w = values[0].len() as u32;
+    let h = values.len() as u32;
+
+    let mut image: RgbImage = ImageBuffer::new(w as u32, h as u32);
+
+    for y in 0..h {
+        for x in 0..w {
+            let val = values[y as usize][x as usize];
+            *image.get_pixel_mut(x, y) = if val < iterations { image::Rgb([255, 255, 255]) } else { image::Rgb([0, 0, 0]) };
+        }
+    }
+
+    image.save(path)
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -148,29 +163,46 @@ pub struct Config {
     //-- calculated
     center: CNumber,
     iterations: i32,
+    is_image: bool,
+    is_console: bool,
+    image_path: String,
+    debug: bool,
 }
 
 impl Config {
     pub fn from(args: Args) -> Result<Config, Box<dyn Error>> {
         let mut config = Config::default();
 
-        for arg in args {
-            if arg.contains("=") {
-                let mut split = arg.split("=");
-                let key = split.next();
-                let value = split.next();
+        for arg in args.into_iter().skip(1) {
+            let mut split = arg.split("=");
+            let key = split.next();
+            let value = split.next();
 
-                let value_f64: f64 = value.ok_or_else(||PropertyError {msg: format!("Error while parsing argument {}", arg)})?.parse()?;
-                config.set_value(key, value_f64);
-                println!("k={}, v={}, v64={}", key.unwrap(), value.unwrap(), value_f64);
-            }
+            match value {
+                None => config.set_value_flag(key)?,
+                Some(_) => config.set_value_value(key, value, &arg)?
+            };
         }
 
         Ok(config)
     }
 
-    fn set_value(&mut self, key: Option<&str>, value: f64) -> Result<(), Box<dyn Error>> {
-        println!("setting arg value");
+    fn set_value_value(&mut self, key: Option<&str>, value: Option<&str>, arg: &String) -> Result<(), Box<dyn Error>> {
+        let val = value.ok_or_else(|| PropertyError { msg: format!("Error while parsing argument {}", arg) })?;
+
+        match key {
+            Some("path") | Some("p") =>
+                self.image_path = String::from(val),
+            _ => {
+                let value_f64: f64 = val.parse()?;
+                self.set_value_f64(key, value_f64);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn set_value_f64(&mut self, key: Option<&str>, value: f64) -> Result<(), Box<dyn Error>> {
         match key {
             Some("iter") | Some("iterations") =>
                 self.iterations = value as i32,
@@ -180,17 +212,33 @@ impl Config {
                 self.width = value,
             Some("quality") | Some("q") =>
                 self.iterations = value as i32,
+
             _ => return Err(Box::new(PropertyError { msg: format!("Property not found: {}", key.unwrap_or_else(|| "")) }))
         }
 
         Ok(())
     }
 
-    pub fn default() -> Config {
-        Config::new(1, 3, 100, 100.0)
+    fn set_value_flag(&mut self, key: Option<&str>) -> Result<(), Box<dyn Error>> {
+        match key {
+            Some("img") | Some("image") =>
+                self.is_image = true,
+            Some("console") | Some("cli") =>
+                self.is_console = true,
+            Some("debug") | Some("dbg") =>
+                self.debug = true,
+            _ => return Err(Box::new(PropertyError { msg: format!("Property not found: {}", key.unwrap_or_else(|| "")) }))
+        }
+
+        Ok(())
     }
 
-    pub fn new(point_number: usize, quality: i32, width: i32, threshold: f32) -> Config {
+
+    pub fn default() -> Config {
+        Config::new(1, 3, 100, 100.0, false, String::from("img.png"), true, false)
+    }
+
+    pub fn new(point_number: usize, quality: i32, width: i32, threshold: f32, is_image: bool, image_path: String, is_console: bool, debug: bool) -> Config {
         let interesting_points = vec![CNumber::new(-0.75, 0.0), CNumber::new(-0.77568377, 0.13646737)];
         let center = interesting_points[point_number];
         let iterations = config_iter_from_quality(quality);
@@ -200,6 +248,10 @@ impl Config {
             center,
             iterations,
             threshold: threshold as f64,
+            is_image,
+            is_console,
+            image_path,
+            debug,
         }
     }
 }

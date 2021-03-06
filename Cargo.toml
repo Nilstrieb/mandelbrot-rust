@@ -1,12 +1,13 @@
 [package]
 name = "mandelbrot_set"
 version = "0.1.0"
-authors = ["Nilstrieb <nils.heydecker@gmx.ch>"]
+authors = ["Nilstrieb <nilstrieb@gmail.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+image = "0.23.14"
 
 [profile.dev]
 opt-level = 3
