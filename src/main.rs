@@ -1,6 +1,5 @@
 use mandelbrot_set::Config;
 use std::{env, process};
-use std::alloc::System;
 
 fn main() {
     let args = env::args();
