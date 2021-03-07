@@ -1,98 +1,97 @@
 use std::error::Error;
-use std::time::SystemTime;
+use std::time::{SystemTime, Duration};
 use std::ops::{Add, Mul};
 use std::env::Args;
 use std::fmt::{Display, Formatter};
 use image::{RgbImage, ImageBuffer, ImageResult};
+use std::io::{self, Write};
 
-pub fn run(config: Config) -> Result<String, Box<dyn Error>> {
+pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let start_time = SystemTime::now();
     let debug = config.debug;
 
-    let coords = calculate_sample_points(&config);
-    if debug { println!("sample points calculated after: {}μs", start_time.elapsed()?.as_micros()); }
+    let result = check_whole_mandelbrot(&config);
 
-    let result = check_whole_mandelbrot(&coords, config.iterations, config.threshold);
-    if debug { println!("calculated after: {}ms", start_time.elapsed()?.as_millis()); }
+    if debug { println!("calculated after: {}", format_time(start_time.elapsed()?)); }
 
     if config.is_image {
         create_image(&result, config.iterations, "img.png")?;
-        if debug { println!("image created after: {}ms", start_time.elapsed()?.as_millis()); }
+        if debug { println!("image created after: {}", format_time(start_time.elapsed()?)); }
     }
     if config.is_console {
         let draw = draw(&result, config.iterations);
         println!("{}", draw);
-        if debug { println!("drawn after: {}μs", start_time.elapsed()?.as_micros()); }
+        if debug { println!("drawn after: {}", format_time(start_time.elapsed()?)); }
     }
 
-    if debug { println!("Total Time: {}ms", start_time.elapsed()?.as_millis()); }
-    Ok(String::new())
+    if debug { println!("Total Time: {}", format_time(start_time.elapsed()?)); }
+    Ok(())
 }
 
-fn calculate_sample_points(config: &Config) -> Vec<Vec<CNumber>> {
+
+fn check_whole_mandelbrot(config: &Config) -> Vec<Vec<u32>> {
     let height = if config.is_image {
-        config.width as f64 * 2.0 / 3.0
+        config.width * 2.0 / 3.0
     } else {
-        config.width as f64 * 0.2
+        config.width * 0.2
     };
 
-    let step_size_x = 3.0 / config.width;
-    let step_size_y = 2.0 / height;
+    let step_size = CNumber {
+        real: 3.0 / config.width,
+        imag: 2.0 / height,
+    };
+    let offset = CNumber {
+        real: config.center.real - config.width / 2.0 * step_size.real,
+        imag: -(config.center.imag - height / 2.0 * step_size.imag) - 2.0,
+    };
 
-    let offset_x = config.center.real - config.width / 2.0 * step_size_x;
-    let offset_y = -(config.center.imag - height / 2.0 * step_size_y) - 2.0;
+    let mut result: Vec<Vec<u32>> = vec![vec![0; config.width as usize]; height as usize];
 
-    let mut coords: Vec<Vec<CNumber>> =
-        vec![vec![CNumber::new(0.0, 0.0); config.width as usize]; height as usize];
+    for i in 0..height as usize {
+        for j in 0..config.width as usize {
+            result[i][j] = check_mandelbrot(j, i, config, &offset, &step_size);
+        }
 
-    for i in 0..config.width as usize {
-        for j in 0..height as usize {
-            coords[j][i].real = offset_x + step_size_x * i as f64;
-            coords[j][i].imag = offset_y + step_size_y * j as f64;
+        if config.debug {
+            let progress = i as f64 / height;
+            print!("\r{:.2}% {}", progress * 100.0, progress_bar(progress));
+            let _ = io::stdout().flush();
         }
     }
 
-    coords
-}
-
-fn check_whole_mandelbrot(nums: &Vec<Vec<CNumber>>, iter: i32, threshold: f64) -> Vec<Vec<i32>> {
-    let height = nums.len();
-    let width = nums[0].len();
-
-    let mut result: Vec<Vec<i32>> = vec![vec![0; nums[0].len()]; nums.len()];
-
-    for i in 0..height {
-        for j in 0..width {
-            result[i][j] = check_mandelbrot(&nums[i][j], iter, threshold);
-        }
-
-        println!("{:.2} of 100%", i as f64 / height as f64 * 100.0);
+    if config.debug {
+        println!("\r100.00% {}", progress_bar(1.0));
     }
 
     result
 }
 
-fn check_mandelbrot(number: &CNumber, iter: i32, threshold: f64) -> i32 {
+fn check_mandelbrot(x: usize, y: usize, config: &Config, offset: &CNumber, step_size: &CNumber) -> u32 {
+    let sample_pos = CNumber {
+        real: offset.real + step_size.real * x as f64,
+        imag: offset.imag + step_size.imag * y as f64,
+    };
+
     let mut n = CNumber::new(0.0, 0.0);
-    let c = number;
+    let c = sample_pos;
 
-    n = n + *c;
+    n = n + c;
 
-    for i in 0..iter {
-        n = n * n + *c;
+    for i in 0..config.iterations {
+        n = n * n + c;
 
-        if n.imag > threshold || n.real > threshold {
+        if n.imag > config.threshold || n.real > config.threshold {
             return i;
         }
     }
 
-    iter
+    config.iterations
 }
 
 static HIGH: &str = "#";
 static LOW: &str = " ";
 
-fn draw(values: &Vec<Vec<i32>>, iterations: i32) -> String {
+fn draw(values: &Vec<Vec<u32>>, iterations: u32) -> String {
     let mut out = String::new();
 
     for line in values {
@@ -105,7 +104,7 @@ fn draw(values: &Vec<Vec<i32>>, iterations: i32) -> String {
     out
 }
 
-fn create_image(values: &Vec<Vec<i32>>, iterations: i32, path: &str) -> ImageResult<()> {
+fn create_image(values: &Vec<Vec<u32>>, iterations: u32, path: &str) -> ImageResult<()> {
     let w = values[0].len() as u32;
     let h = values.len() as u32;
 
@@ -119,6 +118,46 @@ fn create_image(values: &Vec<Vec<i32>>, iterations: i32, path: &str) -> ImageRes
     }
 
     image.save(path)
+}
+
+static BAR_SIZE: usize = 50;
+
+fn progress_bar(progress: f64) -> String {
+    let mut bar = String::from("[");
+    let bar_amount = (BAR_SIZE as f64 * progress).round() as usize;
+
+    bar.push_str(&*"#".repeat(bar_amount));
+    bar.push_str(&*"-".repeat(BAR_SIZE - bar_amount));
+
+    bar.push(']');
+    bar
+}
+
+fn format_time(d: Duration) -> String {
+    if d.as_micros() < 10 {
+        format!("{}ns", d.as_nanos())
+    } else if d.as_millis() < 10 {
+        format!("{}μs", d.as_micros())
+    } else if d.as_secs() < 10 {
+        format!("{}ms", d.as_millis())
+    } else {
+        let secs = d.as_secs();
+
+        if secs < 60 {
+            format!("{}s", secs)
+        } else {
+            let mins = secs / 60;
+            let secs = secs % 60;
+
+            if mins < 60 {
+                format!("{}m {}s", mins, secs)
+            } else {
+                let hours = mins / 60;
+                let mins = mins % 60;
+                format!("{}h {}m {}s", hours, mins, secs)
+            }
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -148,9 +187,8 @@ impl Mul for CNumber {
     type Output = CNumber;
 
     fn mul(self, b: Self) -> Self::Output {
-        //(a+bi)(c+di) = (ac−bd) + (ad+bc)i
-        let real = self.real * b.real - self.imag * b.imag; //ac−bd
-        let imag = self.real * b.imag + self.imag * b.real; //ad+bc
+        let real = self.real * b.real - self.imag * b.imag;
+        let imag = self.real * b.imag + self.imag * b.real;
 
         CNumber { real, imag }
     }
@@ -162,7 +200,7 @@ pub struct Config {
     threshold: f64,
     //-- calculated
     center: CNumber,
-    iterations: i32,
+    iterations: u32,
     is_image: bool,
     is_console: bool,
     image_path: String,
@@ -184,34 +222,38 @@ impl Config {
             };
         }
 
+        if !config.is_image {
+            config.is_console = true;
+        }
+
         Ok(config)
     }
 
     fn set_value_value(&mut self, key: Option<&str>, value: Option<&str>, arg: &String) -> Result<(), Box<dyn Error>> {
         let val = value.ok_or_else(|| PropertyError { msg: format!("Error while parsing argument {}", arg) })?;
 
-        match key {
-            Some("path") | Some("p") =>
-                self.image_path = String::from(val),
+        return match key {
+            Some("path") | Some("p") => {
+                self.image_path = String::from(val);
+                Ok(())
+            }
             _ => {
                 let value_f64: f64 = val.parse()?;
-                self.set_value_f64(key, value_f64);
+                self.set_value_f64(key, value_f64)
             }
-        }
-
-        Ok(())
+        };
     }
 
     fn set_value_f64(&mut self, key: Option<&str>, value: f64) -> Result<(), Box<dyn Error>> {
         match key {
             Some("iter") | Some("iterations") =>
-                self.iterations = value as i32,
+                self.iterations = value as u32,
             Some("thres") | Some("threshold") =>
                 self.threshold = value,
             Some("w") | Some("width") =>
                 self.width = value,
             Some("quality") | Some("q") =>
-                self.iterations = value as i32,
+                self.iterations = value as u32,
 
             _ => return Err(Box::new(PropertyError { msg: format!("Property not found: {}", key.unwrap_or_else(|| "")) }))
         }
@@ -235,7 +277,7 @@ impl Config {
 
 
     pub fn default() -> Config {
-        Config::new(1, 3, 100, 100.0, false, String::from("img.png"), true, false)
+        Config::new(1, 3, 100, 100.0, false, String::from("img.png"), false, false)
     }
 
     pub fn new(point_number: usize, quality: i32, width: i32, threshold: f32, is_image: bool, image_path: String, is_console: bool, debug: bool) -> Config {
@@ -256,14 +298,14 @@ impl Config {
     }
 }
 
-fn config_iter_from_quality(quality: i32) -> i32 {
+fn config_iter_from_quality(quality: i32) -> u32 {
     match quality {
         0 => 20,
         1 => 500,
         2 => 1000,
         3 => 5000,
         4 => 20000,
-        _ => quality
+        _ => quality.abs() as u32
     }
 }
 
@@ -304,33 +346,6 @@ mod tests {
         let a = CNumber::new(1.0, 2.0);
         let b = CNumber::new(3.0, 4.0);
         assert_eq!(a * b, CNumber::new(-5.0, 10.0));
-    }
-
-    #[test]
-    fn correct_size_points() {
-        let config = Config::new(1, 0, 100, 0.0);
-
-        let result = calculate_sample_points(&config);
-
-        result[0][0];
-        result[0][99];
-    }
-
-    #[test]
-    fn check_mandelbrot_test() {
-        let iter = 1000;
-        let thr = 100.0;
-
-        assert!(check_mandelbrot(&CNumber::new(1.0, 1.0), iter, thr) < iter);
-        assert!(check_mandelbrot(&CNumber::new(2.0, 0.0), iter, thr) < iter);
-        assert_eq!(check_mandelbrot(&CNumber::new(0.0, 0.0), iter, thr), iter);
-        assert!(check_mandelbrot(&CNumber::new(0.0, 3.0), iter, thr) < iter);
-        assert!(check_mandelbrot(&CNumber::new(0.8, 0.0), iter, thr) < iter);
-        assert!(check_mandelbrot(&CNumber::new(0.7, 0.0), iter, thr) < iter);
-        assert!(check_mandelbrot(&CNumber::new(0.7, 0.0), iter, thr) < iter);
-        assert_eq!(check_mandelbrot(&CNumber::new(0.1, 0.1), iter, thr), iter);
-        assert_eq!(check_mandelbrot(&CNumber::new(0.1, 0.1), iter, thr), iter);
-        assert!(check_mandelbrot(&CNumber::new(-2.17068377, -1.13646737), iter, thr) < iter); //CNumber { real: -2.17068377, imag: -1.13646737 }
     }
 
     #[test]

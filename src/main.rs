@@ -10,10 +10,9 @@ fn main() {
         process::exit(1);
     });
 
-    //let config = Config::new(1, 4, 1000, 100.0);
-
     match mandelbrot_set::run(config) {
-        Ok(s) => println!("{}", s),
+        Ok(_) => (),
         Err(e) => println!("Error: {}", e)
     }
 }
+
