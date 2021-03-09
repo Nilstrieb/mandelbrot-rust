@@ -6,7 +6,6 @@ use std::ops::{Add, Mul};
 use std::time::{Duration, SystemTime};
 
 use image::{ImageBuffer, Rgb, RgbImage};
-use std::cmp::max;
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let start_time = SystemTime::now();
@@ -143,7 +142,6 @@ fn draw(values: &Vec<Vec<u32>>, iterations: u32) -> String {
 }
 
 static BAR_SIZE: usize = 50;
-
 fn progress_bar(progress: f64) -> String {
     let mut bar = String::from("[");
     let bar_amount = (BAR_SIZE as f64 * progress).round() as usize;
