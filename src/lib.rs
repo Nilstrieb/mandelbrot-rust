@@ -1,28 +1,25 @@
-use std::error::Error;
-use std::time::{SystemTime, Duration};
-use std::ops::{Add, Mul};
 use std::env::Args;
+use std::error::Error;
 use std::fmt::{Display, Formatter};
-use image::{RgbImage, ImageBuffer, ImageResult};
 use std::io::{self, Write};
+use std::ops::{Add, Mul};
+use std::time::{Duration, SystemTime};
+
+use image::{ImageBuffer, Rgb, RgbImage};
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let start_time = SystemTime::now();
     let debug = config.debug;
 
-    let result = check_whole_mandelbrot(&config);
-
-    if debug { println!("calculated after: {}", format_time(start_time.elapsed()?)); }
-
     if config.is_image {
-        create_image(&result, config.iterations, "img.png")?;
-        if debug { println!("image created after: {}", format_time(start_time.elapsed()?)); }
-    }
-    if config.is_console {
+        check_whole_mandelbrot_img_single_pass(&config)?;
+    } else {
+        let result = check_whole_mandelbrot(&config);
         let draw = draw(&result, config.iterations);
         println!("{}", draw);
-        if debug { println!("drawn after: {}", format_time(start_time.elapsed()?)); }
     }
+
+    if debug { println!("calculated in: {}", format_time(start_time.elapsed()?)); }
 
     if debug { println!("Total Time: {}", format_time(start_time.elapsed()?)); }
     Ok(())
@@ -88,36 +85,62 @@ fn check_mandelbrot(x: usize, y: usize, config: &Config, offset: &CNumber, step_
     config.iterations
 }
 
-static HIGH: &str = "#";
-static LOW: &str = " ";
+fn check_whole_mandelbrot_img_single_pass(config: &Config) -> Result<(), Box<dyn Error>> {
+    let height = config.width * 2.0 / 3.0;
+
+    let mut image: RgbImage = ImageBuffer::new(config.width as u32, height as u32);
+
+    let step_size = CNumber {
+        real: 3.0 / config.width,
+        imag: 2.0 / height,
+    };
+    let offset = CNumber {
+        real: config.center.real - config.width / 2.0 * step_size.real,
+        imag: -(config.center.imag - height / 2.0 * step_size.imag) - 2.0,
+    };
+
+
+    for i in 0..height as usize {
+        for j in 0..config.width as usize {
+            let value = check_mandelbrot(j, i, config, &offset, &step_size);
+            *image.get_pixel_mut(j as u32, i as u32) = get_color_for_pixel(value, config.iterations)
+        }
+
+        if config.debug {
+            let progress = i as f64 / height;
+            print!("\r{:.2}% {}", progress * 100.0, progress_bar(progress));
+            let _ = io::stdout().flush();
+        }
+    }
+
+    if config.debug {
+        println!("\r100.00% {}", progress_bar(1.0));
+    }
+
+    image.save(&config.image_path)?;
+
+    Ok(())
+}
+
+fn get_color_for_pixel(value: u32, iter: u32) -> Rgb<u8> {
+    if value < iter {
+        image::Rgb([255, 255, 255])
+    } else {
+        image::Rgb([0, 0, 0])
+    }
+}
 
 fn draw(values: &Vec<Vec<u32>>, iterations: u32) -> String {
     let mut out = String::new();
 
     for line in values {
         for char in line {
-            out += if char < &iterations { LOW } else { HIGH };
+            out += if char < &iterations { " " } else { "#" };
         }
         out += "\n";
     }
 
     out
-}
-
-fn create_image(values: &Vec<Vec<u32>>, iterations: u32, path: &str) -> ImageResult<()> {
-    let w = values[0].len() as u32;
-    let h = values.len() as u32;
-
-    let mut image: RgbImage = ImageBuffer::new(w as u32, h as u32);
-
-    for y in 0..h {
-        for x in 0..w {
-            let val = values[y as usize][x as usize];
-            *image.get_pixel_mut(x, y) = if val < iterations { image::Rgb([255, 255, 255]) } else { image::Rgb([0, 0, 0]) };
-        }
-    }
-
-    image.save(path)
 }
 
 static BAR_SIZE: usize = 50;
@@ -135,30 +158,33 @@ fn progress_bar(progress: f64) -> String {
 
 fn format_time(d: Duration) -> String {
     if d.as_micros() < 10 {
-        format!("{}ns", d.as_nanos())
-    } else if d.as_millis() < 10 {
-        format!("{}μs", d.as_micros())
-    } else if d.as_secs() < 10 {
-        format!("{}ms", d.as_millis())
-    } else {
-        let secs = d.as_secs();
-
-        if secs < 60 {
-            format!("{}s", secs)
-        } else {
-            let mins = secs / 60;
-            let secs = secs % 60;
-
-            if mins < 60 {
-                format!("{}m {}s", mins, secs)
-            } else {
-                let hours = mins / 60;
-                let mins = mins % 60;
-                format!("{}h {}m {}s", hours, mins, secs)
-            }
-        }
+        return format!("{}ns", d.as_nanos());
     }
+    if d.as_millis() < 10 {
+        return format!("{}μs", d.as_micros());
+    }
+    if d.as_secs() < 10 {
+        return format!("{}ms", d.as_millis());
+    }
+
+    let ms = d.as_millis() % 1000;
+    let secs = d.as_secs();
+
+    if secs < 60 {
+        return format!("{}s {}ms", secs, ms);
+    }
+
+    let mins = secs / 60;
+    let secs = secs % 60;
+
+    if mins < 60 {
+        return format!("{}m {}s {}ms", mins, secs, ms);
+    }
+    let hours = mins / 60;
+    let mins = mins % 60;
+    format!("{}h {}m {}s {}ms", hours, mins, secs, ms)
 }
+
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 struct CNumber {
@@ -202,7 +228,6 @@ pub struct Config {
     center: CNumber,
     iterations: u32,
     is_image: bool,
-    is_console: bool,
     image_path: String,
     debug: bool,
 }
@@ -220,10 +245,6 @@ impl Config {
                 None => config.set_value_flag(key)?,
                 Some(_) => config.set_value_value(key, value, &arg)?
             };
-        }
-
-        if !config.is_image {
-            config.is_console = true;
         }
 
         Ok(config)
@@ -265,8 +286,6 @@ impl Config {
         match key {
             Some("img") | Some("image") =>
                 self.is_image = true,
-            Some("console") | Some("cli") =>
-                self.is_console = true,
             Some("debug") | Some("dbg") =>
                 self.debug = true,
             _ => return Err(Box::new(PropertyError { msg: format!("Property not found: {}", key.unwrap_or_else(|| "")) }))
@@ -277,10 +296,10 @@ impl Config {
 
 
     pub fn default() -> Config {
-        Config::new(1, 3, 100, 100.0, false, String::from("img.png"), false, false)
+        Config::new(1, 3, 100, 100.0, false, String::from("img.png"), false)
     }
 
-    pub fn new(point_number: usize, quality: i32, width: i32, threshold: f32, is_image: bool, image_path: String, is_console: bool, debug: bool) -> Config {
+    pub fn new(point_number: usize, quality: i32, width: i32, threshold: f32, is_image: bool, image_path: String, debug: bool) -> Config {
         let interesting_points = vec![CNumber::new(-0.75, 0.0), CNumber::new(-0.77568377, 0.13646737)];
         let center = interesting_points[point_number];
         let iterations = config_iter_from_quality(quality);
@@ -291,7 +310,6 @@ impl Config {
             iterations,
             threshold: threshold as f64,
             is_image,
-            is_console,
             image_path,
             debug,
         }
@@ -324,7 +342,7 @@ impl Error for PropertyError {}
 
 #[cfg(tests)]
 mod tests {
-    use crate::{CNumber, calculate_sample_points, check_mandelbrot, draw, HIGH, LOW, Config};
+    use crate::{calculate_sample_points, check_mandelbrot, CNumber, Config, draw, HIGH, LOW};
 
     #[test]
     fn cnumber_add_test() {
