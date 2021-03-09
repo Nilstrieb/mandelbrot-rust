@@ -6,6 +6,7 @@ use std::ops::{Add, Mul};
 use std::time::{Duration, SystemTime};
 
 use image::{ImageBuffer, Rgb, RgbImage};
+use std::cmp::max;
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let start_time = SystemTime::now();
@@ -103,7 +104,7 @@ fn check_whole_mandelbrot_img_single_pass(config: &Config) -> Result<(), Box<dyn
     for i in 0..height as usize {
         for j in 0..config.width as usize {
             let value = check_mandelbrot(j, i, config, &offset, &step_size);
-            *image.get_pixel_mut(j as u32, i as u32) = get_color_for_pixel(value, config.iterations)
+            *image.get_pixel_mut(j as u32, i as u32) = get_color_for_pixel(value as f32, config.iterations as f32)
         }
 
         if config.debug {
@@ -122,12 +123,10 @@ fn check_whole_mandelbrot_img_single_pass(config: &Config) -> Result<(), Box<dyn
     Ok(())
 }
 
-fn get_color_for_pixel(value: u32, iter: u32) -> Rgb<u8> {
-    if value < iter {
-        image::Rgb([255, 255, 255])
-    } else {
-        image::Rgb([0, 0, 0])
-    }
+fn get_color_for_pixel(value: f32, iter: f32) -> Rgb<u8> {
+    let multiplier: f32 = 1.0 - (value * value).min(iter) / iter;
+    let i: u8 = (255 as f32 * multiplier) as u8;
+    image::Rgb([i, i, i])
 }
 
 fn draw(values: &Vec<Vec<u32>>, iterations: u32) -> String {
