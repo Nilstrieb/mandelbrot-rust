@@ -1,22 +1,42 @@
 use std::env::Args;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
-use std::io::{self, Write};
 use std::ops::{Add, Mul};
 use std::time::{Duration, SystemTime};
 
-use image::{ImageBuffer, Rgb, RgbImage};
+use image::{ImageBuffer, Rgb, RgbImage, ImageResult};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
     let start_time = SystemTime::now();
     let debug = config.debug;
 
+    let height = config.width * 2.0 / 3.0;
+
+    let mut handles = vec![];
+    let result: Arc<Mutex<Vec<Vec<u32>>>> = Arc::new(Mutex::new(vec![vec![0; config.width as usize]; height as usize]));
+
+    let thread_size = 10;
+
+    for i in 0..thread_size {
+        let mut result = Arc::clone(&result);
+        let id = i.clone();
+        let config = config.clone();
+        let thread_size = thread_size;
+        let handle = thread::spawn(move || {
+            check_part_of_mandelbrot(&mut result, &config, thread_size, id)
+        });
+
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
     if config.is_image {
-        check_whole_mandelbrot_img_single_pass(&config)?;
-    } else {
-        let result = check_whole_mandelbrot(&config);
-        let draw = draw(&result, config.iterations);
-        println!("{}", draw);
+        create_image(&result.lock().unwrap(), config.iterations, &*config.image_path)?
     }
 
     if debug { println!("calculated in: {}", format_time(start_time.elapsed()?)); }
@@ -26,12 +46,8 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 }
 
 
-fn check_whole_mandelbrot(config: &Config) -> Vec<Vec<u32>> {
-    let height = if config.is_image {
-        config.width * 2.0 / 3.0
-    } else {
-        config.width * 0.2
-    };
+fn check_part_of_mandelbrot(vec: &mut Arc<Mutex<Vec<Vec<u32>>>>, config: &Config, parts: u32, id: u32) {
+    let height = config.width * 2.0 / 3.0;
 
     let step_size = CNumber {
         real: 3.0 / config.width,
@@ -42,25 +58,15 @@ fn check_whole_mandelbrot(config: &Config) -> Vec<Vec<u32>> {
         imag: -(config.center.imag - height / 2.0 * step_size.imag) - 2.0,
     };
 
-    let mut result: Vec<Vec<u32>> = vec![vec![0; config.width as usize]; height as usize];
+    let part_height = height as u32 / parts;
+    let start_index = part_height * id;
+    let end_index = part_height * (id + 1);
 
-    for i in 0..height as usize {
+    for i in start_index as usize..end_index as usize {
         for j in 0..config.width as usize {
-            result[i][j] = check_mandelbrot(j, i, config, &offset, &step_size);
-        }
-
-        if config.debug {
-            let progress = i as f64 / height;
-            print!("\r{:.2}% {}", progress * 100.0, progress_bar(progress));
-            let _ = io::stdout().flush();
+            vec.lock().unwrap()[i][j] = check_mandelbrot(j, i, config, &offset, &step_size);
         }
     }
-
-    if config.debug {
-        println!("\r100.00% {}", progress_bar(1.0));
-    }
-
-    result
 }
 
 fn check_mandelbrot(x: usize, y: usize, config: &Config, offset: &CNumber, step_size: &CNumber) -> u32 {
@@ -85,42 +91,22 @@ fn check_mandelbrot(x: usize, y: usize, config: &Config, offset: &CNumber, step_
     config.iterations
 }
 
-fn check_whole_mandelbrot_img_single_pass(config: &Config) -> Result<(), Box<dyn Error>> {
-    let height = config.width * 2.0 / 3.0;
+fn create_image(values: &Vec<Vec<u32>>, iterations: u32, path: &str) -> ImageResult<()> {
+    let w = values[0].len() as u32;
+    let h = values.len() as u32;
 
-    let mut image: RgbImage = ImageBuffer::new(config.width as u32, height as u32);
+    let mut image: RgbImage = ImageBuffer::new(w as u32, h as u32);
 
-    let step_size = CNumber {
-        real: 3.0 / config.width,
-        imag: 2.0 / height,
-    };
-    let offset = CNumber {
-        real: config.center.real - config.width / 2.0 * step_size.real,
-        imag: -(config.center.imag - height / 2.0 * step_size.imag) - 2.0,
-    };
-
-
-    for i in 0..height as usize {
-        for j in 0..config.width as usize {
-            let value = check_mandelbrot(j, i, config, &offset, &step_size);
-            *image.get_pixel_mut(j as u32, i as u32) = get_color_for_pixel(value as f32, config.iterations as f32)
-        }
-
-        if config.debug {
-            let progress = i as f64 / height;
-            print!("\r{:.2}% {}", progress * 100.0, progress_bar(progress));
-            let _ = io::stdout().flush();
+    for y in 0..h {
+        for x in 0..w {
+            let val = values[y as usize][x as usize];
+            *image.get_pixel_mut(x, y) = get_color_for_pixel(val as f32, iterations as f32);
         }
     }
 
-    if config.debug {
-        println!("\r100.00% {}", progress_bar(1.0));
-    }
-
-    image.save(&config.image_path)?;
-
-    Ok(())
+    image.save(path)
 }
+
 
 fn get_color_for_pixel(value: f32, iter: f32) -> Rgb<u8> {
     let multiplier: f32 = 1.0 - (value * value).min(iter) / iter;
@@ -128,20 +114,8 @@ fn get_color_for_pixel(value: f32, iter: f32) -> Rgb<u8> {
     image::Rgb([i, i, i])
 }
 
-fn draw(values: &Vec<Vec<u32>>, iterations: u32) -> String {
-    let mut out = String::new();
-
-    for line in values {
-        for char in line {
-            out += if char < &iterations { " " } else { "#" };
-        }
-        out += "\n";
-    }
-
-    out
-}
-
 static BAR_SIZE: usize = 50;
+
 fn progress_bar(progress: f64) -> String {
     let mut bar = String::from("[");
     let bar_amount = (BAR_SIZE as f64 * progress).round() as usize;
@@ -217,7 +191,7 @@ impl Mul for CNumber {
     }
 }
 
-
+#[derive(Clone)]
 pub struct Config {
     width: f64,
     threshold: f64,
