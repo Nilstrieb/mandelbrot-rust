@@ -142,6 +142,7 @@ fn draw(values: &Vec<Vec<u32>>, iterations: u32) -> String {
 }
 
 static BAR_SIZE: usize = 50;
+
 fn progress_bar(progress: f64) -> String {
     let mut bar = String::from("[");
     let bar_amount = (BAR_SIZE as f64 * progress).round() as usize;
@@ -369,7 +370,6 @@ mod tests {
         let out = draw(vector, 10);
         println!("{}", out);
         assert_eq!(out, "  ###
-  ###
-")
+  ###")
     }
 }
