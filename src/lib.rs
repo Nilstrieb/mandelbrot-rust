@@ -13,25 +13,54 @@ use image::{ImageBuffer, ImageResult, Rgb, RgbImage};
 static PTX: &str = include_str!("../target/gpu.ptx");
 
 pub fn run(_: Config) -> Result<(), Box<dyn Error>> {
-    let center = CNumber::new(-0.77568377, 0.13646737);
-
-    let c_w = 4;
-    let c_h = 2;
-
-    let cfg = Cfg {
-        start: CNumber::new(-3.0, 1.),
-        end: CNumber::new(1., -1.),
-        height: 500 * 20,
-        width: 1000 * 10,
-        iterations: 30000,
-        threshold: 100,
-    };
-
-    let amount = cfg.height as usize * cfg.width as usize;
-
-    println!("{} points will be calculated", amount);
+    let start_time = SystemTime::now();
 
     let _ctx = cust::quick_init()?;
+
+    let center = CNumber::new(-0.77568377, 0.13646737);
+
+    let max_zoom = 1_000_000.;
+    let zoom_speed = 1.1;
+
+    let mut zoom = 1.;
+    let mut i = 0;
+
+    while zoom < max_zoom {
+        let start = CNumber::new(center.real - 2. / zoom, center.imag + 1. / zoom);
+        let end = CNumber::new(center.real + 2. / zoom, center.imag - 1. / zoom);
+
+        let height = 1000;
+
+        let cfg = Cfg {
+            start,
+            end,
+            height,
+            width: height * 2,
+            iterations: 50000,
+            threshold: 100,
+        };
+
+        let start_inner_time = SystemTime::now();
+        run_single_image(cfg, &format!("seq/gpu_{}.png", i))?;
+        println!(
+            "Iteration '{}' in time: {} with zoom {:.2}/{:.2}",
+            i,
+            format_time(start_inner_time.elapsed()?),
+            zoom,
+            max_zoom
+        );
+
+        i += 1;
+        zoom *= zoom_speed;
+    }
+
+    println!("Total time: {}", format_time(start_time.elapsed()?));
+
+    Ok(())
+}
+
+fn run_single_image(cfg: Cfg, filename: &str) -> Result<(), Box<dyn Error>> {
+    let amount = cfg.height as usize * cfg.width as usize;
 
     let module = Module::from_str(PTX)?;
     let stream = Stream::new(StreamFlags::NON_BLOCKING, None)?;
@@ -44,7 +73,6 @@ pub fn run(_: Config) -> Result<(), Box<dyn Error>> {
     let threads = Vec2::new(32, 32);
     let blocks = (Vec2::new(cfg.width, cfg.height) / threads) + 1;
 
-    let start_time = SystemTime::now();
     unsafe {
         launch!(
             func<<<blocks, threads, 0, stream>>>(
@@ -65,12 +93,7 @@ pub fn run(_: Config) -> Result<(), Box<dyn Error>> {
 
     out_buf.copy_to(&mut out)?;
 
-    println!("expected {}, got {} numbers!", amount, out.len());
-
-    println!("calculated in: {}", format_time(start_time.elapsed()?));
-
-    create_image(&out, cfg, "gpu.png")?;
-    println!("Total Time: {}", format_time(start_time.elapsed()?));
+    create_image(&out, cfg, filename)?;
 
     Ok(())
 }
