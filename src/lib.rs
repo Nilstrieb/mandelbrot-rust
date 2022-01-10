@@ -13,15 +13,19 @@ use image::{ImageBuffer, ImageResult, Rgb, RgbImage};
 static PTX: &str = include_str!("../target/gpu.ptx");
 
 pub fn run(_: Config) -> Result<(), Box<dyn Error>> {
+    let center = CNumber::new(-0.77568377, 0.13646737);
+
+    let c_w = 4;
+    let c_h = 2;
+
     let cfg = Cfg {
         start: CNumber::new(-3.0, 1.),
         end: CNumber::new(1., -1.),
-        height: 500 * 10,
+        height: 500 * 20,
         width: 1000 * 10,
-        iterations: 100000,
+        iterations: 30000,
         threshold: 100,
     };
-
 
     let amount = cfg.height as usize * cfg.width as usize;
 
@@ -37,7 +41,7 @@ pub fn run(_: Config) -> Result<(), Box<dyn Error>> {
 
     let func = module.get_function("mandelbrot")?;
 
-    let threads = Vec2::new(16, 16);
+    let threads = Vec2::new(32, 32);
     let blocks = (Vec2::new(cfg.width, cfg.height) / threads) + 1;
 
     let start_time = SystemTime::now();
@@ -63,9 +67,9 @@ pub fn run(_: Config) -> Result<(), Box<dyn Error>> {
 
     println!("expected {}, got {} numbers!", amount, out.len());
 
-    create_image(&out, cfg, "gpu.png")?;
-
     println!("calculated in: {}", format_time(start_time.elapsed()?));
+
+    create_image(&out, cfg, "gpu.png")?;
     println!("Total Time: {}", format_time(start_time.elapsed()?));
 
     Ok(())
