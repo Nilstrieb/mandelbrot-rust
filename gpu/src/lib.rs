@@ -47,6 +47,7 @@ pub unsafe fn mandelbrot(
 
     let idx = thread::index_2d();
 
+
     if idx.x >= width || idx.y >= height {
         return;
     }
@@ -61,12 +62,12 @@ fn check_part_of_mandelbrot(cfg: Cfg, id: Vec2<u32>) -> u32 {
     let x_step_size = (cfg.end.real - cfg.start.real) / cfg.width as f64;
     let y_step_size = (cfg.end.imag - cfg.start.imag) / cfg.height as f64;
 
-    let x = x_step_size * id.x as f64;
-    let y = y_step_size * id.y as f64;
+    let x_offset = x_step_size * id.x as f64;
+    let y_offset = y_step_size * id.y as f64;
 
     let sample_pos = CNumber {
-        real: cfg.start.real + x,
-        imag: cfg.start.imag + y,
+        real: cfg.start.real + x_offset,
+        imag: cfg.start.imag + y_offset,
     };
 
     check_mandelbrot(sample_pos, cfg.iterations, cfg.threshold)

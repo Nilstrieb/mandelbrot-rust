@@ -216,6 +216,7 @@ dependencies = [
  "cust_derive",
  "cust_raw",
  "find_cuda_helper",
+ "vek",
 ]
 
 [[package]]
@@ -412,6 +413,7 @@ version = "0.1.0"
 dependencies = [
  "cuda_builder",
  "cust",
+ "gpu",
  "image",
 ]
 

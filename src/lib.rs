@@ -6,18 +6,26 @@ use std::fmt::{Display, Formatter};
 use std::time::{Duration, SystemTime};
 
 use cust::prelude::*;
+use cust::vek::Vec2;
 use gpu::{CNumber, Cfg};
 use image::{ImageBuffer, ImageResult, Rgb, RgbImage};
 
 static PTX: &str = include_str!("../target/gpu.ptx");
 
-pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
-    let start_time = SystemTime::now();
+pub fn run(_: Config) -> Result<(), Box<dyn Error>> {
+    let cfg = Cfg {
+        start: CNumber::new(-3.0, 1.),
+        end: CNumber::new(1., -1.),
+        height: 500 * 10,
+        width: 1000 * 10,
+        iterations: 100000,
+        threshold: 100,
+    };
 
-    let debug = config.debug;
-    let height = config.width * 2.0 / 3.0;
 
-    let amount = (height * config.width) as usize;
+    let amount = cfg.height as usize * cfg.width as usize;
+
+    println!("{} points will be calculated", amount);
 
     let _ctx = cust::quick_init()?;
 
@@ -29,22 +37,13 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
     let func = module.get_function("mandelbrot")?;
 
-    let (_, block_size) = func.suggested_launch_configuration(amount, 0.into())?;
+    let threads = Vec2::new(16, 16);
+    let blocks = (Vec2::new(cfg.width, cfg.height) / threads) + 1;
 
-    let grid_size = (amount as u32 + block_size - 1) / block_size;
-
-    let cfg = Cfg {
-        start: CNumber::new(-0.5, 0.5),
-        end: CNumber::new(0.5, 0.5),
-        height: 500,
-        width: 500,
-        iterations: 1000,
-        threshold: 100,
-    };
-
+    let start_time = SystemTime::now();
     unsafe {
         launch!(
-            func<<<grid_size, block_size, 0, stream>>>(
+            func<<<blocks, threads, 0, stream>>>(
                 cfg.start.real,
                 cfg.start.imag,
                 cfg.end.real,
@@ -62,23 +61,17 @@ pub fn run(config: Config) -> Result<(), Box<dyn Error>> {
 
     out_buf.copy_to(&mut out)?;
 
-    create_image(&out, cfg, "gpu.png")?;
-
-    // now do things with out
     println!("expected {}, got {} numbers!", amount, out.len());
 
-    if debug {
-        println!("calculated in: {}", format_time(start_time.elapsed()?));
-    }
+    create_image(&out, cfg, "gpu.png")?;
 
-    if debug {
-        println!("Total Time: {}", format_time(start_time.elapsed()?));
-    }
+    println!("calculated in: {}", format_time(start_time.elapsed()?));
+    println!("Total Time: {}", format_time(start_time.elapsed()?));
+
     Ok(())
 }
 
 fn create_image(values: &[u32], cfg: Cfg, path: &str) -> ImageResult<()> {
-
     let mut image: RgbImage = ImageBuffer::new(cfg.width, cfg.height);
 
     for y in 0..cfg.height {
